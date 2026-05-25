@@ -88,6 +88,11 @@ export class RoomsGateway {
     if (allReady) {
       await this.roomRepo.update(data.roomId, { status: 'playing' });
 
+      const room = await this.roomRepo.findOne({
+        where: { id: data.roomId },
+        relations: ['players', 'players.user'],
+      });
+
       const userIds = players.sort((a, b) => a.seatIndex - b.seatIndex).map((p) => p.userId);
       const socketMap = this.roomUsers.get(data.roomId);
 
@@ -99,6 +104,23 @@ export class RoomsGateway {
         { userId: userIds[0], socketId: player1SocketId },
         { userId: userIds[1], socketId: player2SocketId },
       );
+
+      this.server.to(`room:${data.roomId}`).emit('room:update', {
+        id: data.roomId,
+        name: room?.name,
+        gameId: room?.gameId,
+        status: 'playing',
+        maxPlayers: room?.maxPlayers,
+        players: room
+          ? room.players.map((p) => ({
+              userId: p.user.id,
+              nickname: p.user.nickname,
+              avatarUrl: p.user.avatarUrl,
+              ready: p.ready,
+              seatIndex: p.seatIndex,
+            }))
+          : [],
+      });
 
       this.server.to(`room:${data.roomId}`).emit('game:state', {
         phase: 'placing',

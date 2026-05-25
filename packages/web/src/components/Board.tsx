@@ -45,37 +45,41 @@ export default function Board({ board, onClick, onHover, hoverCells, isOwnBoard,
     onHover?.(null, null);
   };
 
+  const gap = 2;
+  const cellSize = 32;
+  const headerSize = 20;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, userSelect: 'none' }}>
-      <div style={{ display: 'flex', gap: 1, paddingLeft: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap, userSelect: 'none' }}>
+      <div style={{ display: 'flex', gap, paddingLeft: headerSize + gap }}>
         {board[0].map((_, col) => (
           <div key={col} style={{
-            width: 32,
-            height: 20,
+            width: cellSize,
+            height: headerSize,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 11,
+            fontSize: hoveredCell && hoveredCell.col === col ? 14 : 11,
             color: hoveredCell && hoveredCell.col === col ? '#1677ff' : '#999',
             fontWeight: hoveredCell && hoveredCell.col === col ? 'bold' : 'normal',
-            transition: 'color 0.1s',
+            transition: 'font-size 0.1s, color 0.1s',
           }}>
             {col}
           </div>
         ))}
       </div>
       {board.map((row, rowIdx) => (
-        <div key={rowIdx} style={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <div key={rowIdx} style={{ display: 'flex', gap, alignItems: 'center' }}>
           <div style={{
-            width: 20,
-            height: 32,
+            width: headerSize,
+            height: cellSize,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 11,
+            fontSize: hoveredCell && hoveredCell.row === rowIdx ? 14 : 11,
             color: hoveredCell && hoveredCell.row === rowIdx ? '#1677ff' : '#999',
             fontWeight: hoveredCell && hoveredCell.row === rowIdx ? 'bold' : 'normal',
-            transition: 'color 0.1s',
+            transition: 'font-size 0.1s, color 0.1s',
           }}>
             {rowIdx}
           </div>
@@ -108,10 +112,9 @@ export default function Board({ board, onClick, onHover, hoverCells, isOwnBoard,
                 onMouseEnter={() => handleMouseEnter(rowIdx, colIdx)}
                 onMouseLeave={handleMouseLeave}
                 style={{
-                  width: 32,
-                  height: 32,
+                  width: cellSize,
+                  height: cellSize,
                   backgroundColor: isHighlighted ? `${bgColor}e0` : bgColor,
-                  border: '1px solid #bbb',
                   borderRadius: 2,
                   cursor: disabled || isOwnBoard ? 'default' : 'pointer',
                   display: 'flex',
@@ -121,7 +124,6 @@ export default function Board({ board, onClick, onHover, hoverCells, isOwnBoard,
                   fontWeight: 'bold',
                   color: textColor,
                   transition: 'background-color 0.1s',
-                  boxSizing: 'border-box',
                 }}
               >
                 {cellChar}

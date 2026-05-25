@@ -57,6 +57,34 @@ function isInBounds(cells: Array<{ row: number; col: number }>) {
   return cells.every((c) => c.row >= 0 && c.row < 10 && c.col >= 0 && c.col < 10);
 }
 
+const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right'];
+
+function generateRandomPlanes(count: number): PlanePlacement[] {
+  const maxAttempts = 1000;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const planes: PlanePlacement[] = [];
+    const occupied = new Set<string>();
+    let valid = true;
+    for (let i = 0; i < count; i++) {
+      let placed = false;
+      for (let j = 0; j < 200; j++) {
+        const head = { row: Math.floor(Math.random() * 10), col: Math.floor(Math.random() * 10) };
+        const direction = DIRECTIONS[Math.floor(Math.random() * 4)];
+        const cells = getPlaneCells(head, direction);
+        if (!isInBounds(cells)) continue;
+        if (cells.some((c) => occupied.has(`${c.row},${c.col}`))) continue;
+        planes.push({ head, direction });
+        for (const c of cells) occupied.add(`${c.row},${c.col}`);
+        placed = true;
+        break;
+      }
+      if (!placed) { valid = false; break; }
+    }
+    if (valid) return planes;
+  }
+  return [];
+}
+
 function buildPreviewBoard(planes: PlanePlacement[]): CellState[][] {
   const board: CellState[][] = Array.from({ length: 10 }, () => Array<CellState>(10).fill('empty'));
   for (const plane of planes) {
@@ -140,6 +168,8 @@ export default function Room() {
         setIsMyTurn(false);
         setWinnerId(null);
         setPlanesConfirmed(false);
+        setAmIReady(false);
+        setPlanes([]);
         return;
       }
       setPhase(data.phase);
@@ -246,6 +276,13 @@ export default function Room() {
     setPlanes(newPlanes);
     setMyBoard(buildPreviewBoard(newPlanes));
   }, [planes]);
+
+  const handleRandomPlace = useCallback(() => {
+    if (!canPlace || planesConfirmed) return;
+    const randomPlanes = generateRandomPlanes(3);
+    setPlanes(randomPlanes);
+    setMyBoard(buildPreviewBoard(randomPlanes));
+  }, [canPlace, planesConfirmed]);
 
   const handleConfirmPlanes = useCallback(() => {
     if (!socket || !id || planes.length !== 3 || planesConfirmed) return;
@@ -431,6 +468,7 @@ export default function Room() {
                 <Divider style={{ margin: '4px 0' }} />
                 <Button onClick={handleRotate} block>旋转方向 (R)</Button>
                 <Button onClick={handleUndoPlane} disabled={planes.length === 0} block>撤销上一架</Button>
+                <Button onClick={handleRandomPlace} block>随机放置</Button>
                 <Button
                   type="primary"
                   onClick={handleConfirmPlanes}
