@@ -130,11 +130,22 @@ export class BombPlaneGateway {
 
     myAttacks.push({ position: data.position });
 
+    // Compute destroyed plane counts
+    const attackerPlanes = isPlayer1 ? session.player1Planes : session.player2Planes;
+    const defenderPlanes = isPlayer1 ? session.player2Planes : session.player1Planes;
+    const attackerAttacks = isPlayer1 ? session.player1Attacks : session.player2Attacks;
+    const defenderAttacks = isPlayer1 ? session.player2Attacks : session.player1Attacks;
+    const destroyedPlanes = {
+      attacker: defenderPlanes ? this.engine.countDestroyedPlanes(defenderPlanes, attackerAttacks) : 0,
+      defender: attackerPlanes ? this.engine.countDestroyedPlanes(attackerPlanes, defenderAttacks) : 0,
+    };
+
     // Notify attacker of result
     client.emit('game:attack-result', {
       position: data.position,
       result,
       attackerUserId: data.userId,
+      destroyedPlanes,
     });
 
     // Notify opponent
@@ -143,6 +154,7 @@ export class BombPlaneGateway {
       position: data.position,
       result,
       attackerUserId: data.userId,
+      destroyedPlanes,
     });
 
     // Check game over

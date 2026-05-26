@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Layout, Card, Table, Button, Modal, Input, Form, Tag, Typography, Row, Col, message } from 'antd';
-import { getGames, getRooms, createRoom, joinRoom, guestLogin, getToken, setAuth, getUser, getMyRoom } from '../api';
+import { Layout, Card, Table, Button, Modal, Tag, Typography, Row, Col, message } from 'antd';
+import { getGames, getRooms, createRoom, joinRoom, guestLogin, getToken, setAuth, getUser, getMyRoom, clearAuth, validateUser, uploadAvatar } from '../api';
+import Avatar from '../components/Avatar';
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -34,14 +35,27 @@ export default function Lobby() {
   const [games, setGames] = useState<GameInfo[]>([]);
   const [selectedGame, setSelectedGame] = useState<number | null>(null);
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [form] = Form.useForm();
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     async function init() {
       if (!getToken()) {
         const data = await guestLogin();
         setAuth(data.token, data.user);
+      } else {
+        // Validate existing user still exists in DB
+        const user = getUser();
+        if (user) {
+          const result = await validateUser(user.id);
+          if (!result.valid) {
+            clearAuth();
+            const data = await guestLogin();
+            setAuth(data.token, data.user);
+          } else if (result.user) {
+            setAuth(getToken()!, { ...user, avatarUrl: result.user.avatarUrl });
+          }
+        }
       }
       const user = getUser();
 
@@ -87,12 +101,10 @@ export default function Lobby() {
     setRooms(data);
   }, []);
 
-  async function handleCreateRoom(values: { name: string }) {
+  async function handleCreateRoom() {
     const user = getUser();
     if (!user || !selectedGame) return;
-    const room = await createRoom({ gameId: selectedGame, name: values.name, creatorId: user.id });
-    setCreateModalOpen(false);
-    form.resetFields();
+    const room = await createRoom({ gameId: selectedGame, creatorId: user.id });
     navigate(`/room/${room.id}`);
   }
 
@@ -151,9 +163,14 @@ export default function Lobby() {
         <Title level={3} style={{ color: '#fff', margin: 0 }}>
           童年游戏合集
         </Title>
-        <Text style={{ color: '#aaa', marginLeft: 16 }}>
-          {getUser()?.nickname || '加载中...'}
-        </Text>
+        <div style={{ flex: 1 }} />
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+          onClick={() => setAvatarModalOpen(true)}
+        >
+          <Avatar avatarUrl={getUser()?.avatarUrl} size={28} />
+          <Text style={{ color: '#fff' }}>{getUser()?.nickname || '加载中...'}</Text>
+        </div>
       </Layout.Header>
       <Layout>
         <Sider width={240} style={{ background: '#fff', padding: 16 }} breakpoint="md" collapsedWidth={0}>
@@ -185,7 +202,7 @@ export default function Lobby() {
               </Title>
             </Col>
             <Col>
-              <Button type="primary" onClick={() => setCreateModalOpen(true)}>
+              <Button type="primary" onClick={handleCreateRoom}>
                 创建房间
               </Button>
             </Col>
@@ -201,16 +218,37 @@ export default function Lobby() {
       </Layout>
 
       <Modal
-        title="创建房间"
-        open={createModalOpen}
-        onCancel={() => setCreateModalOpen(false)}
-        onOk={() => form.submit()}
+        title="修改头像"
+        open={avatarModalOpen}
+        onCancel={() => setAvatarModalOpen(false)}
+        footer={null}
+        width={320}
       >
-        <Form form={form} onFinish={handleCreateRoom}>
-          <Form.Item name="name" label="房间名" rules={[{ required: true, message: '请输入房间名' }]}>
-            <Input placeholder="给你的房间起个名字" />
-          </Form.Item>
-        </Form>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <Avatar avatarUrl={getUser()?.avatarUrl} size={80} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const u = getUser();
+              if (!u) return;
+              const result = await uploadAvatar(u.id, file);
+              if (result?.avatarUrl) {
+                setAuth(getToken()!, { ...u, avatarUrl: result.avatarUrl });
+                setAvatarModalOpen(false);
+              } else {
+                message.error('上传失败');
+              }
+            }}
+          />
+          <Button type="primary" onClick={() => fileInputRef.current?.click()}>
+            上传头像
+          </Button>
+        </div>
       </Modal>
     </Layout>
   );

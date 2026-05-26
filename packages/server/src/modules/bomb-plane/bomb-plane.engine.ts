@@ -141,6 +141,18 @@ export class BombPlaneEngine {
     return 'miss';
   }
 
+  // Count how many planes have been destroyed (heads hit)
+  countDestroyedPlanes(planes: PlanePlacement[], attacks: Array<{ position: { row: number; col: number } }>): number {
+    let count = 0;
+    for (const plane of planes) {
+      const head = this.getHeadPosition(plane);
+      if (attacks.some((a) => a.position.row === head.row && a.position.col === head.col)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   // Check if all heads are hit (heads found in attacks)
   checkGameOver(planes: PlanePlacement[], attacks: Array<{ position: { row: number; col: number } }>): boolean {
     const headsHit = new Set<string>();

@@ -57,10 +57,11 @@ export class RoomsGateway {
       gameId: room.gameId,
       status: room.status,
       maxPlayers: room.maxPlayers,
+      creatorId: room.creatorId,
       players: room.players.map((p) => ({
-        userId: p.user.id,
-        nickname: p.user.nickname,
-        avatarUrl: p.user.avatarUrl,
+        userId: p.user?.id ?? p.userId,
+        nickname: p.user?.nickname ?? '未知用户',
+        avatarUrl: p.user?.avatarUrl ?? null,
         ready: p.ready,
         seatIndex: p.seatIndex,
       })),
@@ -111,11 +112,12 @@ export class RoomsGateway {
         gameId: room?.gameId,
         status: 'playing',
         maxPlayers: room?.maxPlayers,
+        creatorId: room?.creatorId,
         players: room
           ? room.players.map((p) => ({
-              userId: p.user.id,
-              nickname: p.user.nickname,
-              avatarUrl: p.user.avatarUrl,
+              userId: p.user?.id ?? p.userId,
+              nickname: p.user?.nickname ?? '未知用户',
+              avatarUrl: p.user?.avatarUrl ?? null,
               ready: p.ready,
               seatIndex: p.seatIndex,
             }))
@@ -144,10 +146,11 @@ export class RoomsGateway {
         gameId: room.gameId,
         status: room.status,
         maxPlayers: room.maxPlayers,
+        creatorId: room.creatorId,
         players: room.players.map((p) => ({
-          userId: p.user.id,
-          nickname: p.user.nickname,
-          avatarUrl: p.user.avatarUrl,
+          userId: p.user?.id ?? p.userId,
+          nickname: p.user?.nickname ?? '未知用户',
+          avatarUrl: p.user?.avatarUrl ?? null,
           ready: p.ready,
           seatIndex: p.seatIndex,
         })),
@@ -173,10 +176,11 @@ export class RoomsGateway {
       gameId: room.gameId,
       status: 'waiting',
       maxPlayers: room.maxPlayers,
+      creatorId: room.creatorId,
       players: room.players.map((p) => ({
-        userId: p.user.id,
-        nickname: p.user.nickname,
-        avatarUrl: p.user.avatarUrl,
+        userId: p.user?.id ?? p.userId,
+        nickname: p.user?.nickname ?? '未知用户',
+        avatarUrl: p.user?.avatarUrl ?? null,
         ready: false,
         seatIndex: p.seatIndex,
       })),
@@ -191,6 +195,50 @@ export class RoomsGateway {
       winnerUserId: null,
       amIReady: false,
       isOpponentReady: false,
+    });
+  }
+
+  @SubscribeMessage('room:kick')
+  async handleKick(@MessageBody() data: { roomId: number; creatorUserId: number; targetUserId: number }, @ConnectedSocket() client: Socket) {
+    const room = await this.roomRepo.findOne({ where: { id: data.roomId } });
+    if (!room || room.creatorId !== data.creatorUserId) return;
+
+    // Notify the kicked player
+    const socketMap = this.roomUsers.get(data.roomId);
+    const kickedSocketId = socketMap?.get(data.targetUserId);
+    if (kickedSocketId) {
+      this.server.to(kickedSocketId).emit('kicked');
+    }
+
+    // Remove from DB
+    await this.playerRepo.delete({ roomId: data.roomId, userId: data.targetUserId });
+
+    // Clean up socket map
+    if (socketMap) {
+      socketMap.delete(data.targetUserId);
+    }
+
+    // Broadcast updated room
+    const updatedRoom = await this.roomRepo.findOne({
+      where: { id: data.roomId },
+      relations: ['players', 'players.user'],
+    });
+    if (!updatedRoom) return;
+
+    this.server.to(`room:${data.roomId}`).emit('room:update', {
+      id: updatedRoom.id,
+      name: updatedRoom.name,
+      gameId: updatedRoom.gameId,
+      status: updatedRoom.status,
+      maxPlayers: updatedRoom.maxPlayers,
+      creatorId: updatedRoom.creatorId,
+      players: updatedRoom.players.map((p) => ({
+        userId: p.user?.id ?? p.userId,
+        nickname: p.user?.nickname ?? '未知用户',
+        avatarUrl: p.user?.avatarUrl ?? null,
+        ready: p.ready,
+        seatIndex: p.seatIndex,
+      })),
     });
   }
 }

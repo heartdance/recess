@@ -3,7 +3,11 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
+import { createWriteStream, mkdirSync, existsSync } from 'fs';
+import { join } from 'path';
 import { User } from '../../entities/user.entity';
+
+const UPLOAD_DIR = join(process.cwd(), 'uploads', 'avatars');
 
 @Injectable()
 export class AuthService {
@@ -23,8 +27,6 @@ export class AuthService {
   }
 
   async wechatLogin(code: string): Promise<{ user: User; token: string }> {
-    // In production, exchange code for openId via WeChat API
-    // For now, mock the openId
     const openId = `wx_mock_${code}`;
     let user = await this.userRepo.findOne({ where: { openId } });
     if (!user) {
@@ -40,5 +42,29 @@ export class AuthService {
 
   async validateUser(userId: number): Promise<User | null> {
     return this.userRepo.findOne({ where: { id: userId } });
+  }
+
+  async uploadAvatar(userId: number, file: Express.Multer.File): Promise<{ avatarUrl: string } | null> {
+    if (!file) return null;
+
+    if (!existsSync(UPLOAD_DIR)) {
+      mkdirSync(UPLOAD_DIR, { recursive: true });
+    }
+
+    const ext = file.originalname.split('.').pop() || 'png';
+    const filename = `${userId}_${uuidv4().slice(0, 8)}.${ext}`;
+    const filepath = join(UPLOAD_DIR, filename);
+
+    await new Promise<void>((resolve, reject) => {
+      const stream = createWriteStream(filepath);
+      stream.write(file.buffer);
+      stream.end();
+      stream.on('finish', resolve);
+      stream.on('error', reject);
+    });
+
+    const avatarUrl = `/uploads/avatars/${filename}`;
+    await this.userRepo.update(userId, { avatarUrl });
+    return { avatarUrl };
   }
 }

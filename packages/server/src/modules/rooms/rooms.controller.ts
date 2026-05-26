@@ -48,12 +48,13 @@ export class RoomsController {
   }
 
   @Post()
-  async create(@Body() body: { gameId: number; name: string; creatorId: number; password?: string }) {
+  async create(@Body() body: { gameId: number; creatorId: number }) {
+    const creator = await this.playerRepo.manager.findOne('User', { where: { id: body.creatorId } }) as any;
+    const name = creator ? `${creator.nickname}的房间` : '房间';
     const room = this.roomRepo.create({
       gameId: body.gameId,
-      name: body.name,
+      name,
       creatorId: body.creatorId,
-      password: body.password || undefined,
     });
     await this.roomRepo.save(room);
 
@@ -84,15 +85,25 @@ export class RoomsController {
 
   @Post(':id/leave')
   async leave(@Param('id') id: number, @Body('userId') userId: number) {
+    const room = await this.roomRepo.findOne({ where: { id } });
+    if (!room) return { success: true };
+
     await this.playerRepo.delete({ roomId: id, userId });
 
-    const remaining = await this.playerRepo.count({ where: { roomId: id } });
-    if (remaining === 0) {
-      // No players left, dissolve the room
-      await this.playerRepo.delete({ roomId: id });
+    const remaining = await this.playerRepo.find({
+      where: { roomId: id },
+      relations: ['user'],
+      order: { seatIndex: 'ASC' },
+    });
+
+    if (remaining.length === 0) {
       await this.roomRepo.delete(id);
-    } else if (remaining < 2) {
-      // Reset room so others can join
+    } else if (room.creatorId === userId) {
+      const newCreator = remaining[0];
+      const newName = `${(newCreator as any).user?.nickname ?? '玩家'}的房间`;
+      await this.roomRepo.update(id, { creatorId: newCreator.userId, name: newName, status: 'waiting' });
+      await this.playerRepo.update({ roomId: id }, { ready: false });
+    } else if (remaining.length < 2) {
       await this.roomRepo.update(id, { status: 'waiting' });
       await this.playerRepo.update({ roomId: id }, { ready: false });
     }

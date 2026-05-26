@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Layout, Button, Typography, Card, Row, Col, Tag, message, Space, Divider } from 'antd';
+import { Button, Typography, Tag, message } from 'antd';
 import { useSocket } from '../hooks/useSocket';
 import { getUser, leaveRoom } from '../api';
 import Board from '../components/Board';
+import Avatar from '../components/Avatar';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 type GamePhase = 'waiting' | 'placing' | 'playing' | 'finished';
 type CellState = 'empty' | 'body' | 'head';
@@ -25,7 +26,6 @@ interface PlanePlacement {
   direction: Direction;
 }
 
-// Plane shape offsets from head (direction = 'up')
 const PLANE_OFFSETS: Record<Direction, Array<{ dr: number; dc: number }>> = {
   up: [
     { dr: 0, dc: 0 }, { dr: 1, dc: -2 }, { dr: 1, dc: -1 }, { dr: 1, dc: 0 },
@@ -100,6 +100,114 @@ function buildPreviewBoard(planes: PlanePlacement[]): CellState[][] {
   return board;
 }
 
+function createEmptyBoard(): CellView[][] {
+  return Array.from({ length: 10 }, () => Array<CellView>(10).fill('unknown'));
+}
+
+function PlayerStatusBar({
+  player,
+  isMe,
+  isCreator,
+  phase,
+  ready,
+  planeCount,
+  planesConfirmed,
+  destroyedPlanes,
+  isWinner,
+  isFinished,
+  onKick,
+}: {
+  player: RoomPlayer | null;
+  isMe: boolean;
+  isCreator: boolean;
+  phase: GamePhase;
+  ready: boolean;
+  planeCount: number;
+  planesConfirmed: boolean;
+  destroyedPlanes: number;
+  isWinner: boolean | null;
+  isFinished: boolean;
+  onKick?: () => void;
+}) {
+  if (!player) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 8, marginBottom: 4, minHeight: 44 }}>
+        <Text type="secondary">等待玩家加入...</Text>
+      </div>
+    );
+  }
+
+  // Reusable mini-tag style for consistent sizing
+  const miniTag = {
+    fontSize: 11,
+    lineHeight: '16px',
+    padding: '0 5px',
+    borderRadius: 3,
+    verticalAlign: 'middle' as const,
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#fafafa', borderRadius: 8, marginBottom: 4 }}>
+      <Avatar avatarUrl={player.avatarUrl} size={28} />
+      <Text strong={isMe} style={{ fontSize: 13 }}>{player.nickname}</Text>
+      {isMe && <Tag color="blue" style={miniTag}>我</Tag>}
+      {isCreator && <Tag color="gold" style={miniTag}>房主</Tag>}
+
+      {phase === 'waiting' && (
+        <Tag color={ready ? 'green' : 'default'} style={miniTag}>{ready ? '已准备' : '未准备'}</Tag>
+      )}
+      {phase === 'placing' && (
+        planesConfirmed
+          ? <Tag color="green" style={miniTag}>部署完成</Tag>
+          : <Tag color="orange" style={miniTag}>已放置 {planeCount}/3 架</Tag>
+      )}
+      {(phase === 'playing' || isFinished) && (
+        <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          {[0, 1, 2].map((i) => {
+            const destroyed = i < destroyedPlanes;
+            return (
+              <span key={i} style={{
+                position: 'relative',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 22,
+                height: 22,
+                fontSize: 16,
+                lineHeight: 1,
+                transition: 'all 0.3s',
+              }}>
+                <span style={{
+                  opacity: destroyed ? 0.25 : 1,
+                  color: destroyed ? '#999' : '#1677ff',
+                  textShadow: destroyed ? 'none' : '0 1px 2px rgba(22,119,255,0.3)',
+                }}>✈</span>
+                {destroyed && (
+                  <span style={{
+                    position: 'absolute',
+                    color: '#ff4d4f',
+                    fontSize: 14,
+                    fontWeight: 'bold',
+                    lineHeight: 1,
+                    textShadow: '0 1px 1px rgba(0,0,0,0.2)',
+                  }}>✕</span>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {isFinished && (
+        <Tag color={isWinner ? 'green' : 'red'} style={miniTag}>{isWinner ? '胜利' : '失败'}</Tag>
+      )}
+
+      {onKick && phase === 'waiting' && (
+        <Button size="small" danger onClick={onKick} style={{ marginLeft: 'auto', fontSize: 11, padding: '0 6px', height: 20 }}>踢出</Button>
+      )}
+    </div>
+  );
+}
+
 export default function Room() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -107,14 +215,17 @@ export default function Room() {
   const user = getUser();
 
   const [players, setPlayers] = useState<RoomPlayer[]>([]);
+  const [roomName, setRoomName] = useState('');
+  const [creatorId, setCreatorId] = useState<number | null>(null);
   const [phase, setPhase] = useState<GamePhase>('waiting');
   const [myBoard, setMyBoard] = useState<CellState[][]>([]);
   const [opponentBoard, setOpponentBoard] = useState<CellView[][]>([]);
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [winnerId, setWinnerId] = useState<number | null>(null);
   const [amIReady, setAmIReady] = useState(false);
+  const [myDestroyedPlanes, setMyDestroyedPlanes] = useState(0);
+  const [opponentDestroyedPlanes, setOpponentDestroyedPlanes] = useState(0);
 
-  // Plane placement state
   const [planes, setPlanes] = useState<PlanePlacement[]>([]);
   const [currentDirection, setCurrentDirection] = useState<Direction>('up');
   const [hoverPos, setHoverPos] = useState<{ row: number; col: number } | null>(null);
@@ -122,7 +233,9 @@ export default function Room() {
 
   const canPlace = phase === 'placing';
 
-  // Compute hover preview cells for plane placement
+  const opponent = players.find((p) => p.userId !== user?.id);
+  const me = players.find((p) => p.userId === user?.id);
+
   const hoverCells = useCallback(() => {
     if (!canPlace || planes.length >= 3 || !hoverPos) return undefined;
     const cells = getPlaneCells(hoverPos, currentDirection);
@@ -157,7 +270,9 @@ export default function Room() {
 
     socket.on('room:update', (data) => {
       setPlayers(data.players);
-      if (data.status === 'playing' && phase === 'waiting') {
+      if (data.name) setRoomName(data.name);
+      if (data.creatorId) setCreatorId(data.creatorId);
+      if (data.status === 'playing') {
         setPhase('placing');
       }
     });
@@ -170,11 +285,12 @@ export default function Room() {
         setPlanesConfirmed(false);
         setAmIReady(false);
         setPlanes([]);
+        setMyDestroyedPlanes(0);
+        setOpponentDestroyedPlanes(0);
         return;
       }
       setPhase(data.phase);
       if (data.phase === 'placing') {
-        // Never overwrite board/planes if player already placed some
         if (planes.length === 0 && data.myBoard) {
           setMyBoard(data.myBoard);
         }
@@ -191,12 +307,17 @@ export default function Room() {
     });
 
     socket.on('game:attack-result', (data) => {
-      if (data.attackerUserId === user?.id) {
+      const isAttacker = data.attackerUserId === user?.id;
+      if (isAttacker) {
         setOpponentBoard((prev) => {
           const next = prev.map((row) => [...row]);
           next[data.position.row][data.position.col] = data.result;
           return next;
         });
+      }
+      if (data.destroyedPlanes) {
+        setMyDestroyedPlanes(isAttacker ? data.destroyedPlanes.defender : data.destroyedPlanes.attacker);
+        setOpponentDestroyedPlanes(isAttacker ? data.destroyedPlanes.attacker : data.destroyedPlanes.defender);
       }
     });
 
@@ -209,6 +330,11 @@ export default function Room() {
       message.error(data.message);
     });
 
+    socket.on('kicked', () => {
+      message.warning('你已被房主踢出房间');
+      navigate('/');
+    });
+
     return () => {
       socket.off('room:update');
       socket.off('game:state');
@@ -216,6 +342,7 @@ export default function Room() {
       socket.off('game:attack-result');
       socket.off('game:over');
       socket.off('error');
+      socket.off('kicked');
     };
   }, [socket, id]);
 
@@ -225,7 +352,6 @@ export default function Room() {
     setCurrentDirection(dirs[(idx + 1) % 4]);
   }, [currentDirection]);
 
-  // Keyboard shortcuts for placing phase
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!canPlace || planesConfirmed) return;
@@ -311,196 +437,141 @@ export default function Room() {
   }, [id, user, navigate]);
 
   const handlePlayAgain = useCallback(() => {
-    if (!socket || !id) return;
+    if (!socket || !id || !user) return;
     socket.emit('game:play-again', { roomId: Number(id) });
-    setAmIReady(false);
+    socket.emit('game:ready', { roomId: Number(id), userId: user.id });
+    setAmIReady(true);
     setPlanes([]);
     setHoverPos(null);
     setCurrentDirection('up');
     setPlanesConfirmed(false);
-  }, [socket, id]);
+    setMyDestroyedPlanes(0);
+    setOpponentDestroyedPlanes(0);
+    setOpponentBoard([]);
+  }, [socket, id, user]);
 
-  // Playing / Finished phase
-  if (phase === 'playing' || phase === 'finished') {
-    return (
-      <Layout style={{ minHeight: '100vh', padding: 24 }}>
-        <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
-          <Col>
-            <Title level={3}>
-              炸飞机 - 房间 {id}
-              <Tag color={phase === 'playing' ? 'blue' : 'default'} style={{ marginLeft: 8 }}>
-                {phase === 'playing' ? '对战阶段' : '已结束'}
-              </Tag>
-            </Title>
-          </Col>
-          <Col>
-            <Space>
-              {phase === 'playing' && (
-                <Tag color={isMyTurn ? 'green' : 'red'}>
-                  {isMyTurn ? '你的回合 - 点击对方棋盘攻击' : '对手回合'}
-                </Tag>
-              )}
-              {phase === 'finished' && (
-                <>
-                  <Tag color={winnerId === user?.id ? 'green' : 'red'}>
-                    {winnerId === user?.id ? '你赢了！' : '你输了'}
-                  </Tag>
-                  <Button type="primary" onClick={handlePlayAgain}>再来一局</Button>
-                </>
-              )}
-              <Button onClick={goBackToLobby}>返回大厅</Button>
-            </Space>
-          </Col>
-        </Row>
-
-        <Row gutter={24} justify="center">
-          <Col xs={24} md={11}>
-            <Card title="我的棋盘" size="small">
-              <Board board={myBoard} onClick={() => {}} isOwnBoard />
-            </Card>
-          </Col>
-          <Col xs={24} md={11}>
-            <Card title="对手棋盘（点击攻击）" size="small">
-              <Board
-                board={opponentBoard}
-                onClick={handleAttack}
-                isOwnBoard={false}
-                disabled={phase !== 'playing' || !isMyTurn}
-              />
-            </Card>
-            <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12, color: '#666' }}>
-              <span><b style={{ color: '#95de64' }}>○ 空</b></span>
-              <span><b style={{ color: '#d48806' }}>× 伤</b></span>
-              <span><b style={{ color: '#ff4d4f' }}>✈ 落</b></span>
-              <span><b>★ 机头</b></span>
-              <span><b style={{ color: '#1677ff' }}>■ 机身</b></span>
-            </div>
-          </Col>
-        </Row>
-      </Layout>
-    );
-  }
-
-  // Waiting + Placing phase (combined)
-  const hasPreviousGame = phase === 'waiting' && myBoard.length > 0 && planes.length === 0;
-  const previewBoard = hasPreviousGame ? myBoard
+  const displayMyBoard = phase === 'waiting' && planes.length === 0 && myBoard.length === 0
+    ? Array.from({ length: 10 }, () => Array(10).fill('empty'))
     : planes.length > 0 ? myBoard
+    : myBoard.length > 0 ? myBoard
     : Array.from({ length: 10 }, () => Array(10).fill('empty'));
-  const showReadyButton = phase === 'waiting' && !amIReady;
+
+  const displayOpponentBoard = phase === 'playing' || phase === 'finished'
+    ? (opponentBoard.length > 0 ? opponentBoard : createEmptyBoard())
+    : createEmptyBoard();
+
+  const isFinished = phase === 'finished';
+  const opponentReady = opponent?.ready ?? false;
 
   return (
-    <Layout style={{ minHeight: '100vh', padding: 24 }}>
-      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
-        <Col>
-          <Title level={3}>
-            炸飞机 - 房间 {id}
-            {phase === 'placing' && (
-              <Tag color="orange" style={{ marginLeft: 8 }}>部署阶段</Tag>
-            )}
-            {hasPreviousGame && winnerId !== null && (
-              <Tag color={winnerId === user?.id ? 'green' : 'red'} style={{ marginLeft: 8 }}>
-                {winnerId === user?.id ? '上局你赢了！' : '上局你输了'}
-              </Tag>
-            )}
-          </Title>
-        </Col>
-        <Col>
-          <Space>
-            {canPlace && (
-              <>
-                <Tag>已放置 {planes.length}/3 架</Tag>
-                <Tag>朝向: {currentDirection === 'up' ? '↑' : currentDirection === 'down' ? '↓' : currentDirection === 'left' ? '←' : '→'}</Tag>
-              </>
-            )}
-            <Button onClick={goBackToLobby}>返回大厅</Button>
-          </Space>
-        </Col>
-      </Row>
+    <div style={{ minHeight: '100vh', padding: '16px 24px', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Button onClick={goBackToLobby}>返回大厅</Button>
+          <span style={{ fontSize: 18, fontWeight: 600 }}>炸飞机 - 房间 {roomName || id}</span>
+        </div>
+        {phase === 'playing' && (
+          <Tag color={isMyTurn ? 'green' : 'red'} style={{ fontSize: 14, padding: '4px 12px' }}>
+            {isMyTurn ? '你的回合 - 点击对方棋盘攻击' : '对手回合'}
+          </Tag>
+        )}
+      </div>
 
-      <Row gutter={24}>
-        <Col>
-          <Card
-            title={hasPreviousGame ? '上局棋盘' : planesConfirmed ? '部署完成 - 你的飞机布局' : canPlace ? '点击棋盘放置飞机' : amIReady ? '已准备，等待对手...' : '先点击右侧「准备」按钮'}
-            size="small"
-          >
-            <Board
-              board={previewBoard}
-              onClick={canPlace && !planesConfirmed ? handlePlaceCell : () => {}}
-              onHover={canPlace && !planesConfirmed ? handleHover : undefined}
-              hoverCells={canPlace && !planesConfirmed ? hoverCells() : undefined}
-              isOwnBoard={hasPreviousGame || planesConfirmed}
-              disabled={!canPlace || planesConfirmed}
-            />
-          </Card>
-        </Col>
-        <Col>
-          <Space direction="vertical" size="middle">
-            {/* Player list */}
-            <Card size="small" title="玩家" style={{ maxWidth: 220 }}>
-              {players.map((p) => (
-                <div key={p.userId} style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text>{p.nickname}</Text>
-                  <Tag color={p.ready ? 'green' : 'default'}>
-                    {p.ready ? '已准备' : '未准备'}
-                  </Tag>
-                </div>
-              ))}
-              {players.length < 2 && (
-                <Text type="secondary">等待其他玩家加入...</Text>
-              )}
-            </Card>
+      {/* Two boards side by side */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 32, flex: 1 }}>
+        {/* Left: My board */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <PlayerStatusBar
+            player={me || null}
+            isMe={true}
+            isCreator={creatorId === user?.id}
+            phase={phase}
+            ready={amIReady}
+            planeCount={planes.length}
+            planesConfirmed={planesConfirmed}
+            destroyedPlanes={myDestroyedPlanes}
+            isWinner={winnerId === user?.id}
+            isFinished={isFinished}
+          />
+          <Board
+            board={displayMyBoard}
+            onClick={canPlace && !planesConfirmed ? handlePlaceCell : () => {}}
+            onHover={canPlace && !planesConfirmed ? handleHover : undefined}
+            hoverCells={canPlace && !planesConfirmed ? hoverCells() : undefined}
+            isOwnBoard={true}
+            disabled={!canPlace || planesConfirmed}
+          />
+        </div>
 
-            {/* Ready button (only when not ready yet) */}
-            {showReadyButton && (
-              <Button type="primary" size="large" block onClick={handleReady}>
-                准备
-              </Button>
-            )}
-            {phase === 'waiting' && amIReady && (
-              <Card size="small" style={{ maxWidth: 220, textAlign: 'center' }}>
-                <Text type="secondary">已准备，等待对手...</Text>
-              </Card>
-            )}
+        {/* Right: Opponent board */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <PlayerStatusBar
+            player={opponent || null}
+            isMe={false}
+            isCreator={creatorId === opponent?.userId}
+            phase={phase}
+            ready={opponentReady}
+            planeCount={0}
+            planesConfirmed={false}
+            destroyedPlanes={opponentDestroyedPlanes}
+            isWinner={winnerId !== null && winnerId !== user?.id}
+            isFinished={isFinished}
+            onKick={creatorId === user?.id && opponent ? () => {
+              socket?.emit('room:kick', { roomId: Number(id), creatorUserId: user?.id, targetUserId: opponent.userId });
+            } : undefined}
+          />
+          <Board
+            board={displayOpponentBoard}
+            onClick={phase === 'playing' && isMyTurn ? handleAttack : () => {}}
+            isOwnBoard={false}
+            disabled={phase !== 'playing' || !isMyTurn}
+          />
+        </div>
+      </div>
 
-            {/* Placement controls */}
-            {canPlace && !planesConfirmed && (
-              <>
-                <Divider style={{ margin: '4px 0' }} />
-                <Button onClick={handleRotate} block>旋转方向 (R)</Button>
-                <Button onClick={handleUndoPlane} disabled={planes.length === 0} block>撤销上一架</Button>
-                <Button onClick={handleRandomPlace} block>随机放置</Button>
-                <Button
-                  type="primary"
-                  onClick={handleConfirmPlanes}
-                  disabled={planes.length !== 3}
-                  block
-                  size="large"
-                >
-                  {planes.length < 3 ? `还需放置 ${3 - planes.length} 架` : '确认部署'}
-                </Button>
-              </>
-            )}
-            {planesConfirmed && (
-              <Card size="small" style={{ maxWidth: 220, textAlign: 'center' }}>
-                <Title level={4} style={{ color: '#52c41a', marginBottom: 8 }}>部署完成!</Title>
-                <Text type="secondary">等待对手完成部署...</Text>
-              </Card>
-            )}
+      {/* Action bar */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+        {phase === 'waiting' && !amIReady && (
+          <Button type="primary" size="large" onClick={handleReady}>准备</Button>
+        )}
+        {phase === 'waiting' && amIReady && (
+          <span style={{ color: '#999', fontSize: 14 }}>已准备，等待对手...</span>
+        )}
+        {canPlace && !planesConfirmed && (
+          <>
+            <Button onClick={handleRotate}>旋转方向 (R)</Button>
+            <Button onClick={handleUndoPlane} disabled={planes.length === 0}>撤销上一架</Button>
+            <Button onClick={handleRandomPlace}>随机放置</Button>
+            <Button
+              type="primary"
+              onClick={handleConfirmPlanes}
+              disabled={planes.length !== 3}
+              size="large"
+            >
+              {planes.length < 3 ? `还需放置 ${3 - planes.length} 架` : '确认部署'}
+            </Button>
+          </>
+        )}
+        {canPlace && planesConfirmed && (
+          <span style={{ color: '#52c41a', fontSize: 14, fontWeight: 500 }}>部署完成，等待对手...</span>
+        )}
+        {isFinished && (
+          <>
+            <Button type="primary" size="large" onClick={handlePlayAgain}>再来一局</Button>
+            <Button size="large" onClick={goBackToLobby}>返回大厅</Button>
+          </>
+        )}
+      </div>
 
-            {/* Legend */}
-            <Card size="small" title="图标说明" style={{ maxWidth: 220 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-                <div><span style={{ display: 'inline-block', width: 18, height: 18, backgroundColor: '#ff4d4f', borderRadius: 2, textAlign: 'center', color: '#fff', fontWeight: 'bold', marginRight: 6 }}>★</span> 机头（被命中即击落）</div>
-                <div><span style={{ display: 'inline-block', width: 18, height: 18, backgroundColor: '#1677ff', borderRadius: 2, textAlign: 'center', color: '#fff', fontWeight: 'bold', marginRight: 6 }}>■</span> 机身</div>
-                <div><span style={{ display: 'inline-block', width: 18, height: 18, backgroundColor: '#95de64', borderRadius: 2, textAlign: 'center', color: '#389e0d', fontWeight: 'bold', marginRight: 6 }}>○</span> 攻击未命中（空）</div>
-                <div><span style={{ display: 'inline-block', width: 18, height: 18, backgroundColor: '#ffec3d', borderRadius: 2, textAlign: 'center', fontWeight: 'bold', marginRight: 6 }}>×</span> 命中机身（伤）</div>
-                <div><span style={{ display: 'inline-block', width: 18, height: 18, backgroundColor: '#ff4d4f', borderRadius: 2, textAlign: 'center', color: '#fff', fontWeight: 'bold', marginRight: 6 }}>✈</span> 命中机头（击落）</div>
-                <div><span style={{ display: 'inline-block', width: 18, height: 18, backgroundColor: '#d9d9d9', borderRadius: 2, textAlign: 'center', fontWeight: 'bold', marginRight: 6, fontSize: 10 }}>?</span> 未探索区域</div>
-              </div>
-            </Card>
-          </Space>
-        </Col>
-      </Row>
-    </Layout>
+      {/* Legend */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 12, fontSize: 12, color: '#666', flexWrap: 'wrap' }}>
+        <span><b style={{ color: '#ff4d4f' }}>★ 机头</b></span>
+        <span><b style={{ color: '#1677ff' }}>■ 机身</b></span>
+        <span><b style={{ color: '#95de64' }}>○ 空</b></span>
+        <span><b style={{ color: '#d48806' }}>× 伤</b></span>
+        <span><b style={{ color: '#ff4d4f' }}>✈ 落</b></span>
+      </div>
+    </div>
   );
 }
