@@ -161,7 +161,9 @@ function PlayerStatusBar({
       {phase === 'placing' && (
         planesConfirmed
           ? <Tag color="green" style={miniTag}>部署完成</Tag>
-          : <Tag color="orange" style={miniTag}>已放置 {planeCount}/3 架</Tag>
+          : isMe
+            ? <Tag color="orange" style={miniTag}>已放置 {planeCount}/3 架</Tag>
+            : <Tag color="default" style={miniTag}>部署中...</Tag>
       )}
       {(phase === 'playing' || isFinished) && (
         <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
@@ -236,6 +238,7 @@ export default function Room() {
   const [currentDirection, setCurrentDirection] = useState<Direction>('up');
   const [hoverPos, setHoverPos] = useState<{ row: number; col: number } | null>(null);
   const [planesConfirmed, setPlanesConfirmed] = useState(false);
+  const [opponentPlanesConfirmed, setOpponentPlanesConfirmed] = useState(false);
   const [playAgainPending, setPlayAgainPending] = useState(false);
   const [opponentWantsPlayAgain, setOpponentWantsPlayAgain] = useState(false);
   const [opponentPlanes, setOpponentPlanes] = useState<PlanePlacement[] | null>(null);
@@ -315,6 +318,7 @@ export default function Room() {
         setOpponentDestroyedPlanes(0);
         setWinnerId(null);
         setPlanesConfirmed(false);
+        setOpponentPlanesConfirmed(false);
         setPlanes([]);
         setHoverPos(null);
         setCurrentDirection('up');
@@ -331,6 +335,12 @@ export default function Room() {
       if (data.opponentBoard) setOpponentBoard(data.opponentBoard);
       setIsMyTurn(data.currentTurnUserId === user?.id);
       setWinnerId(data.winnerUserId);
+      if (data.amIReady) setPlanesConfirmed(true);
+      if (data.isOpponentReady !== undefined) setOpponentPlanesConfirmed(data.isOpponentReady);
+    });
+
+    socket.on('game:opponent-ready', () => {
+      setOpponentPlanesConfirmed(true);
     });
 
     socket.on('game:turn', (data) => {
@@ -585,7 +595,7 @@ export default function Room() {
             phase={phase}
             ready={opponentReady}
             planeCount={0}
-            planesConfirmed={false}
+            planesConfirmed={opponentPlanesConfirmed}
             destroyedPlanes={opponentDestroyedPlanes}
             isWinner={winnerId !== null && winnerId !== user?.id}
             isFinished={isFinished}

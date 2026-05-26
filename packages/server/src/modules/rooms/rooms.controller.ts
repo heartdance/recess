@@ -102,10 +102,8 @@ export class RoomsController {
       const newCreator = remaining[0];
       const newName = `${(newCreator as any).user?.nickname ?? '玩家'}的房间`;
       await this.roomRepo.update(id, { creatorId: newCreator.userId, name: newName, status: 'waiting' });
-      await this.playerRepo.update({ roomId: id }, { ready: false });
     } else if (remaining.length < 2) {
       await this.roomRepo.update(id, { status: 'waiting' });
-      await this.playerRepo.update({ roomId: id }, { ready: false });
     }
 
     return { success: true };

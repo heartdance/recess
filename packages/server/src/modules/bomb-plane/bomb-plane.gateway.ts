@@ -75,6 +75,10 @@ export class BombPlaneGateway {
       isOpponentReady: isPlayer1 ? !!session.player2Planes : !!session.player1Planes,
     });
 
+    // Notify the opponent that this player is ready
+    const opponentSocketId = isPlayer1 ? session.player2.socketId : session.player1.socketId;
+    this.server.to(opponentSocketId).emit('game:opponent-ready', {});
+
     // If both players have placed, start the game
     if (session.player1Planes && session.player2Planes) {
       session.currentTurn = 'player1';

@@ -114,7 +114,10 @@ export class RoomsGateway {
     } else if (remaining.length < 2) {
       await this.roomRepo.update(data.roomId, { status: 'waiting' });
     }
-    await this.playerRepo.update({ roomId: data.roomId }, { ready: false });
+    await this.playerRepo.update(
+      { roomId: data.roomId, userId: data.userId },
+      { ready: false },
+    );
 
     const updatedRoom = await this.roomRepo.findOne({
       where: { id: data.roomId },
@@ -194,8 +197,8 @@ export class RoomsGateway {
         myAttacks: [],
         currentTurnUserId: null,
         winnerUserId: null,
-        amIReady: true,
-        isOpponentReady: true,
+        amIReady: false,
+        isOpponentReady: false,
       });
     } else {
       const room = await this.roomRepo.findOne({
@@ -300,8 +303,8 @@ export class RoomsGateway {
       myAttacks: [],
       currentTurnUserId: null,
       winnerUserId: null,
-      amIReady: true,
-      isOpponentReady: true,
+      amIReady: false,
+      isOpponentReady: false,
     });
   }
 
