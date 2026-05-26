@@ -11,6 +11,7 @@ interface BoardProps {
   hoverCells?: Array<{ row: number; col: number; type: 'head' | 'body'; valid: boolean }>;
   isOwnBoard: boolean;
   disabled?: boolean;
+  active?: boolean;
 }
 
 const cellColors: Record<string, string> = {
@@ -23,7 +24,7 @@ const cellColors: Record<string, string> = {
   headshot: '#ff4d4f',
 };
 
-export default function Board({ board, onClick, onHover, hoverCells, isOwnBoard, disabled }: BoardProps) {
+export default function Board({ board, onClick, onHover, hoverCells, isOwnBoard, disabled, active }: BoardProps) {
   const [hoveredCell, setHoveredCell] = useState<{ row: number; col: number } | null>(null);
 
   if (!board || board.length === 0) return null;
@@ -86,6 +87,7 @@ export default function Board({ board, onClick, onHover, hoverCells, isOwnBoard,
           {row.map((cell, colIdx) => {
             const hover = hoverMap.get(`${rowIdx},${colIdx}`);
             let bgColor = cellColors[cell] || '#d9d9d9';
+            if (!active && cell === 'unknown') bgColor = '#e8e8e8';
             let cellChar = '';
             let textColor: string | undefined;
 

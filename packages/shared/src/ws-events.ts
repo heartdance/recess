@@ -24,6 +24,7 @@ export interface RoomState {
   gameId: number;
   status: 'waiting' | 'playing' | 'finished';
   maxPlayers: number;
+  scores: Record<number, number>; // userId -> win count
   players: Array<{
     userId: number;
     nickname: string;

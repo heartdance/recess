@@ -6,7 +6,9 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { Inject, forwardRef } from '@nestjs/common';
 import { BombPlaneEngine, PlanePlacement, CellState } from './bomb-plane.engine';
+import { RoomsGateway } from '../rooms/rooms.gateway';
 
 interface GameSession {
   player1: { userId: number; socketId: string };
@@ -28,7 +30,11 @@ export class BombPlaneGateway {
 
   private sessions: Map<number, GameSession> = new Map();
 
-  constructor(private engine: BombPlaneEngine) {}
+  constructor(
+    private engine: BombPlaneEngine,
+    @Inject(forwardRef(() => RoomsGateway))
+    private roomsGateway: RoomsGateway,
+  ) {}
 
   @SubscribeMessage('game:place-planes')
   async handlePlacePlanes(
@@ -176,6 +182,8 @@ export class BombPlaneGateway {
           player2: { userId: session.player2.userId, placements: session.player2Planes },
         },
       });
+      this.roomsGateway.recordWin(data.roomId, data.userId);
+      this.roomsGateway.broadcastScores(data.roomId);
       this.sessions.delete(data.roomId);
       return;
     }

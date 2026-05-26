@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RoomsController } from './rooms.controller';
 import { RoomsGateway } from './rooms.gateway';
@@ -14,7 +14,7 @@ import { BombPlaneEngine } from '../bomb-plane/bomb-plane.engine';
   imports: [
     TypeOrmModule.forFeature([Room, RoomPlayer, User]),
     AuthModule,
-    BombPlaneModule,
+    forwardRef(() => BombPlaneModule),
   ],
   controllers: [RoomsController],
   providers: [RoomsGateway, BombPlaneGateway, BombPlaneEngine],

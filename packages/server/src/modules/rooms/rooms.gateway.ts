@@ -20,6 +20,7 @@ export class RoomsGateway {
 
   private roomUsers: Map<number, Map<number, string>> = new Map();
   private playAgainVotes: Map<number, Set<number>> = new Map();
+  private roomScores: Map<number, Map<number, number>> = new Map(); // roomId -> userId -> wins
 
   constructor(
     @InjectRepository(Room)
@@ -59,6 +60,7 @@ export class RoomsGateway {
       status: room.status,
       maxPlayers: room.maxPlayers,
       creatorId: room.creatorId,
+      scores: this.getScores(data.roomId),
       players: room.players.map((p) => ({
         userId: p.user?.id ?? p.userId,
         nickname: p.user?.nickname ?? '未知用户',
@@ -70,7 +72,7 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('room:leave')
-  async handleLeave(@MessageBody() data: { roomId: number }, @ConnectedSocket() client: Socket) {
+  async handleLeave(@MessageBody() data: { roomId: number; userId?: number }, @ConnectedSocket() client: Socket) {
     client.leave(`room:${data.roomId}`);
     const users = this.roomUsers.get(data.roomId);
     if (users) {
@@ -78,6 +80,65 @@ export class RoomsGateway {
         if (sid === client.id) { users.delete(uid); break; }
       }
     }
+    this.resetScores(data.roomId);
+
+    if (data.userId) {
+      await this.playerRepo.delete({ roomId: data.roomId, userId: data.userId });
+    }
+
+    const room = await this.roomRepo.findOne({
+      where: { id: data.roomId },
+      relations: ['players', 'players.user'],
+    });
+
+    if (!room) return;
+
+    const remaining = await this.playerRepo.find({
+      where: { roomId: data.roomId },
+      relations: ['user'],
+      order: { seatIndex: 'ASC' },
+    });
+
+    if (remaining.length === 0) {
+      await this.roomRepo.delete(data.roomId);
+      return;
+    }
+
+    if (room.creatorId === data.userId && remaining.length > 0) {
+      const newCreator = remaining[0];
+      await this.roomRepo.update(data.roomId, {
+        creatorId: newCreator.userId,
+        name: `${(newCreator as any).user?.nickname ?? '玩家'}的房间`,
+        status: 'waiting',
+      });
+    } else if (remaining.length < 2) {
+      await this.roomRepo.update(data.roomId, { status: 'waiting' });
+    }
+    await this.playerRepo.update({ roomId: data.roomId }, { ready: false });
+
+    const updatedRoom = await this.roomRepo.findOne({
+      where: { id: data.roomId },
+      relations: ['players', 'players.user'],
+    });
+
+    if (!updatedRoom) return;
+
+    this.server.to(`room:${data.roomId}`).emit('room:update', {
+      id: updatedRoom.id,
+      name: updatedRoom.name,
+      gameId: updatedRoom.gameId,
+      status: updatedRoom.status,
+      maxPlayers: updatedRoom.maxPlayers,
+      creatorId: updatedRoom.creatorId,
+      scores: this.getScores(data.roomId),
+      players: updatedRoom.players.map((p) => ({
+        userId: p.user?.id ?? p.userId,
+        nickname: p.user?.nickname ?? '未知用户',
+        avatarUrl: p.user?.avatarUrl ?? null,
+        ready: p.ready,
+        seatIndex: p.seatIndex,
+      })),
+    });
   }
 
   @SubscribeMessage('game:ready')
@@ -114,6 +175,7 @@ export class RoomsGateway {
         status: 'playing',
         maxPlayers: room?.maxPlayers,
         creatorId: room?.creatorId,
+        scores: this.getScores(data.roomId),
         players: room
           ? room.players.map((p) => ({
               userId: p.user?.id ?? p.userId,
@@ -148,6 +210,7 @@ export class RoomsGateway {
         status: room.status,
         maxPlayers: room.maxPlayers,
         creatorId: room.creatorId,
+        scores: this.getScores(data.roomId),
         players: room.players.map((p) => ({
           userId: p.user?.id ?? p.userId,
           nickname: p.user?.nickname ?? '未知用户',
@@ -220,6 +283,7 @@ export class RoomsGateway {
       status: 'playing',
       maxPlayers: room.maxPlayers,
       creatorId: room.creatorId,
+      scores: this.getScores(data.roomId),
       players: room.players.map((p) => ({
         userId: p.user?.id ?? p.userId,
         nickname: p.user?.nickname ?? '未知用户',
@@ -260,6 +324,7 @@ export class RoomsGateway {
     if (socketMap) {
       socketMap.delete(data.targetUserId);
     }
+    this.resetScores(data.roomId);
 
     // Broadcast updated room
     const updatedRoom = await this.roomRepo.findOne({
@@ -275,6 +340,7 @@ export class RoomsGateway {
       status: updatedRoom.status,
       maxPlayers: updatedRoom.maxPlayers,
       creatorId: updatedRoom.creatorId,
+      scores: this.getScores(data.roomId),
       players: updatedRoom.players.map((p) => ({
         userId: p.user?.id ?? p.userId,
         nickname: p.user?.nickname ?? '未知用户',
@@ -283,6 +349,37 @@ export class RoomsGateway {
         seatIndex: p.seatIndex,
       })),
     });
+  }
+
+  // Called by BombPlaneGateway when a game ends
+  recordWin(roomId: number, winnerUserId: number) {
+    if (!this.roomScores.has(roomId)) {
+      this.roomScores.set(roomId, new Map());
+    }
+    const scores = this.roomScores.get(roomId)!;
+    scores.set(winnerUserId, (scores.get(winnerUserId) || 0) + 1);
+  }
+
+  // Called when players change (leave/kick) to reset scores
+  resetScores(roomId: number) {
+    this.roomScores.delete(roomId);
+  }
+
+  // Broadcast current scores to the room
+  broadcastScores(roomId: number) {
+    this.server.to(`room:${roomId}`).emit('room:update', {
+      scores: this.getScores(roomId),
+    });
+  }
+
+  private getScores(roomId: number): Record<number, number> {
+    const scores = this.roomScores.get(roomId);
+    if (!scores) return {};
+    const result: Record<number, number> = {};
+    for (const [userId, wins] of scores) {
+      result[userId] = wins;
+    }
+    return result;
   }
 }
 

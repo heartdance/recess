@@ -239,11 +239,12 @@ export default function Room() {
   const [playAgainPending, setPlayAgainPending] = useState(false);
   const [opponentWantsPlayAgain, setOpponentWantsPlayAgain] = useState(false);
   const [opponentPlanes, setOpponentPlanes] = useState<PlanePlacement[] | null>(null);
+  const [scores, setScores] = useState<Record<number, number>>({});
 
   const canPlace = phase === 'placing';
 
-  const opponent = players.find((p) => p.userId !== user?.id);
-  const me = players.find((p) => p.userId === user?.id);
+  const opponent = players?.find((p) => p.userId !== user?.id);
+  const me = players?.find((p) => p.userId === user?.id);
 
   const hoverCells = useCallback(() => {
     if (!canPlace || planes.length >= 3 || !hoverPos) return undefined;
@@ -278,9 +279,10 @@ export default function Room() {
     socket.emit('room:join', { roomId: Number(id), userId: user?.id });
 
     socket.on('room:update', (data) => {
-      setPlayers(data.players);
+      if (data.players) setPlayers(data.players);
       if (data.name) setRoomName(data.name);
       if (data.creatorId) setCreatorId(data.creatorId);
+      if (data.scores) setScores(data.scores);
       if (data.status === 'playing') {
         setPhase('placing');
       }
@@ -481,10 +483,11 @@ export default function Room() {
 
   const goBackToLobby = useCallback(async () => {
     if (id && user) {
+      socket?.emit('room:leave', { roomId: Number(id), userId: user.id });
       try { await leaveRoom(Number(id), user.id); } catch { /* ignore */ }
     }
     navigate('/');
-  }, [id, user, navigate]);
+  }, [id, user, navigate, socket]);
 
   const handlePlayAgain = useCallback(() => {
     if (!socket || !id || !user) return;
@@ -522,6 +525,10 @@ export default function Room() {
   const isFinished = phase === 'finished';
   const opponentReady = opponent?.ready ?? false;
 
+  const myScore = me ? (scores[me.userId] || 0) : 0;
+  const opponentScore = opponent ? (scores[opponent.userId] || 0) : 0;
+  const hasScores = me && opponent;
+
   return (
     <div style={{ minHeight: '100vh', padding: '16px 24px', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
@@ -529,6 +536,11 @@ export default function Room() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Button onClick={goBackToLobby}>返回大厅</Button>
           <span style={{ fontSize: 18, fontWeight: 600 }}>炸飞机 - 房间 {roomName || id}</span>
+          {hasScores && (
+            <Tag color="blue" style={{ fontSize: 14, padding: '4px 12px', marginLeft: 8 }}>
+              比分 {myScore} : {opponentScore}
+            </Tag>
+          )}
         </div>
         {phase === 'playing' && (
           <Tag color={isMyTurn ? 'green' : 'red'} style={{ fontSize: 14, padding: '4px 12px' }}>
@@ -587,6 +599,7 @@ export default function Room() {
             onClick={phase === 'playing' && isMyTurn ? handleAttack : () => {}}
             isOwnBoard={false}
             disabled={phase !== 'playing' || !isMyTurn}
+            active={phase === 'playing' && isMyTurn}
           />
         </div>
       </div>
