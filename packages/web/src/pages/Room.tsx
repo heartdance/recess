@@ -115,6 +115,7 @@ function PlayerStatusBar({
   destroyedPlanes,
   isWinner,
   isFinished,
+  playAgainReady,
   onKick,
 }: {
   player: RoomPlayer | null;
@@ -127,6 +128,7 @@ function PlayerStatusBar({
   destroyedPlanes: number;
   isWinner: boolean | null;
   isFinished: boolean;
+  playAgainReady?: boolean;
   onKick?: () => void;
 }) {
   if (!player) {
@@ -200,6 +202,9 @@ function PlayerStatusBar({
       {isFinished && (
         <Tag color={isWinner ? 'green' : 'red'} style={miniTag}>{isWinner ? '胜利' : '失败'}</Tag>
       )}
+      {isFinished && playAgainReady && (
+        <Tag color="green" style={miniTag}>已准备</Tag>
+      )}
 
       {onKick && phase === 'waiting' && (
         <Button size="small" danger onClick={onKick} style={{ marginLeft: 'auto', fontSize: 11, padding: '0 6px', height: 20 }}>踢出</Button>
@@ -230,6 +235,8 @@ export default function Room() {
   const [currentDirection, setCurrentDirection] = useState<Direction>('up');
   const [hoverPos, setHoverPos] = useState<{ row: number; col: number } | null>(null);
   const [planesConfirmed, setPlanesConfirmed] = useState(false);
+  const [playAgainPending, setPlayAgainPending] = useState(false);
+  const [opponentWantsPlayAgain, setOpponentWantsPlayAgain] = useState(false);
 
   const canPlace = phase === 'placing';
 
@@ -287,13 +294,29 @@ export default function Room() {
         setPlanes([]);
         setMyDestroyedPlanes(0);
         setOpponentDestroyedPlanes(0);
+        setPlayAgainPending(false);
+        setOpponentWantsPlayAgain(false);
+        setHoverPos(null);
+        setCurrentDirection('up');
+        setOpponentBoard([]);
+        setMyBoard([]);
         return;
+      }
+      if (data.phase === 'placing') {
+        setPlayAgainPending(false);
+        setOpponentWantsPlayAgain(false);
+        setMyDestroyedPlanes(0);
+        setOpponentDestroyedPlanes(0);
+        setWinnerId(null);
+        setPlanesConfirmed(false);
+        setPlanes([]);
+        setHoverPos(null);
+        setCurrentDirection('up');
+        setOpponentBoard([]);
       }
       setPhase(data.phase);
       if (data.phase === 'placing') {
-        if (planes.length === 0 && data.myBoard) {
-          setMyBoard(data.myBoard);
-        }
+        if (data.myBoard) setMyBoard(data.myBoard);
       } else {
         if (data.myBoard) setMyBoard(data.myBoard);
       }
@@ -326,6 +349,14 @@ export default function Room() {
       setWinnerId(data.winnerUserId);
     });
 
+    socket.on('game:play-again-pending', () => {
+      setPlayAgainPending(true);
+    });
+
+    socket.on('game:play-again-voted', () => {
+      setOpponentWantsPlayAgain(true);
+    });
+
     socket.on('error', (data) => {
       message.error(data.message);
     });
@@ -341,6 +372,8 @@ export default function Room() {
       socket.off('game:turn');
       socket.off('game:attack-result');
       socket.off('game:over');
+      socket.off('game:play-again-pending');
+      socket.off('game:play-again-voted');
       socket.off('error');
       socket.off('kicked');
     };
@@ -438,16 +471,8 @@ export default function Room() {
 
   const handlePlayAgain = useCallback(() => {
     if (!socket || !id || !user) return;
-    socket.emit('game:play-again', { roomId: Number(id) });
-    socket.emit('game:ready', { roomId: Number(id), userId: user.id });
-    setAmIReady(true);
-    setPlanes([]);
-    setHoverPos(null);
-    setCurrentDirection('up');
-    setPlanesConfirmed(false);
-    setMyDestroyedPlanes(0);
-    setOpponentDestroyedPlanes(0);
-    setOpponentBoard([]);
+    socket.emit('game:play-again', { roomId: Number(id), userId: user.id });
+    setPlayAgainPending(true);
   }, [socket, id, user]);
 
   const displayMyBoard = phase === 'waiting' && planes.length === 0 && myBoard.length === 0
@@ -493,6 +518,7 @@ export default function Room() {
             destroyedPlanes={myDestroyedPlanes}
             isWinner={winnerId === user?.id}
             isFinished={isFinished}
+            playAgainReady={playAgainPending}
           />
           <Board
             board={displayMyBoard}
@@ -517,6 +543,7 @@ export default function Room() {
             destroyedPlanes={opponentDestroyedPlanes}
             isWinner={winnerId !== null && winnerId !== user?.id}
             isFinished={isFinished}
+            playAgainReady={opponentWantsPlayAgain}
             onKick={creatorId === user?.id && opponent ? () => {
               socket?.emit('room:kick', { roomId: Number(id), creatorUserId: user?.id, targetUserId: opponent.userId });
             } : undefined}
@@ -556,11 +583,14 @@ export default function Room() {
         {canPlace && planesConfirmed && (
           <span style={{ color: '#52c41a', fontSize: 14, fontWeight: 500 }}>部署完成，等待对手...</span>
         )}
-        {isFinished && (
+        {isFinished && !playAgainPending && (
           <>
             <Button type="primary" size="large" onClick={handlePlayAgain}>再来一局</Button>
             <Button size="large" onClick={goBackToLobby}>返回大厅</Button>
           </>
+        )}
+        {isFinished && playAgainPending && (
+          <Button size="large" onClick={goBackToLobby}>返回大厅</Button>
         )}
       </div>
 

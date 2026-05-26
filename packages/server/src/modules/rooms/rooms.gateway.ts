@@ -19,6 +19,7 @@ export class RoomsGateway {
   server: Server;
 
   private roomUsers: Map<number, Map<number, string>> = new Map();
+  private playAgainVotes: Map<number, Set<number>> = new Map();
 
   constructor(
     @InjectRepository(Room)
@@ -159,10 +160,40 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('game:play-again')
-  async handlePlayAgain(@MessageBody() data: { roomId: number }, @ConnectedSocket() client: Socket) {
-    await this.roomRepo.update(data.roomId, { status: 'waiting' });
-    await this.playerRepo.update({ roomId: data.roomId }, { ready: false });
+  async handlePlayAgain(@MessageBody() data: { roomId: number; userId: number }, @ConnectedSocket() client: Socket) {
+    const players = await this.playerRepo.find({ where: { roomId: data.roomId } });
+    if (!players.some((p) => p.userId === data.userId)) return;
+
+    if (!this.playAgainVotes.has(data.roomId)) {
+      this.playAgainVotes.set(data.roomId, new Set());
+    }
+    this.playAgainVotes.get(data.roomId)!.add(data.userId);
+
+    // Notify the other player that this player wants to play again
+    const socketMap = this.roomUsers.get(data.roomId);
+    const voterSocketId = socketMap?.get(data.userId);
+    if (voterSocketId) {
+      this.server.to(voterSocketId).emit('game:play-again-pending');
+    }
+    const otherPlayer = players.find((p) => p.userId !== data.userId);
+    if (otherPlayer) {
+      const otherSocketId = socketMap?.get(otherPlayer.userId);
+      if (otherSocketId) {
+        this.server.to(otherSocketId).emit('game:play-again-voted');
+      }
+    }
+
+    const votes = this.playAgainVotes.get(data.roomId)!;
+    const allVoted = players.length === 2 && players.every((p) => votes.has(p.userId));
+
+    if (!allVoted) return;
+
+    // Both voted — clean up votes and go directly to placing phase
+    this.playAgainVotes.delete(data.roomId);
     this.bombPlaneGateway.destroySession(data.roomId);
+
+    await this.roomRepo.update(data.roomId, { status: 'playing' });
+    await this.playerRepo.update({ roomId: data.roomId }, { ready: true });
 
     const room = await this.roomRepo.findOne({
       where: { id: data.roomId },
@@ -170,31 +201,43 @@ export class RoomsGateway {
     });
     if (!room) return;
 
+    const playerList = await this.playerRepo.find({ where: { roomId: data.roomId } });
+    const userIds = playerList.sort((a, b) => a.seatIndex - b.seatIndex).map((p) => p.userId);
+
+    const player1SocketId = socketMap?.get(userIds[0]) || '';
+    const player2SocketId = socketMap?.get(userIds[1]) || '';
+
+    this.bombPlaneGateway.initSession(
+      data.roomId,
+      { userId: userIds[0], socketId: player1SocketId },
+      { userId: userIds[1], socketId: player2SocketId },
+    );
+
     this.server.to(`room:${data.roomId}`).emit('room:update', {
       id: room.id,
       name: room.name,
       gameId: room.gameId,
-      status: 'waiting',
+      status: 'playing',
       maxPlayers: room.maxPlayers,
       creatorId: room.creatorId,
       players: room.players.map((p) => ({
         userId: p.user?.id ?? p.userId,
         nickname: p.user?.nickname ?? '未知用户',
         avatarUrl: p.user?.avatarUrl ?? null,
-        ready: false,
+        ready: true,
         seatIndex: p.seatIndex,
       })),
     });
 
     this.server.to(`room:${data.roomId}`).emit('game:state', {
-      phase: 'waiting',
-      myBoard: null,
-      opponentBoard: null,
+      phase: 'placing',
+      myBoard: createEmptyBoard(),
+      opponentBoard: createEmptyUnknownBoard(),
       myAttacks: [],
       currentTurnUserId: null,
       winnerUserId: null,
-      amIReady: false,
-      isOpponentReady: false,
+      amIReady: true,
+      isOpponentReady: true,
     });
   }
 
