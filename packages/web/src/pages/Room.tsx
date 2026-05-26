@@ -238,6 +238,7 @@ export default function Room() {
   const [planesConfirmed, setPlanesConfirmed] = useState(false);
   const [playAgainPending, setPlayAgainPending] = useState(false);
   const [opponentWantsPlayAgain, setOpponentWantsPlayAgain] = useState(false);
+  const [opponentPlanes, setOpponentPlanes] = useState<PlanePlacement[] | null>(null);
 
   const canPlace = phase === 'placing';
 
@@ -302,6 +303,7 @@ export default function Room() {
         setOpponentBoard([]);
         setMyBoard([]);
         setMyAttacked([]);
+        setOpponentPlanes(null);
         return;
       }
       if (data.phase === 'placing') {
@@ -316,6 +318,7 @@ export default function Room() {
         setCurrentDirection('up');
         setOpponentBoard([]);
         setMyAttacked([]);
+        setOpponentPlanes(null);
       }
       setPhase(data.phase);
       if (data.phase === 'placing') {
@@ -353,9 +356,14 @@ export default function Room() {
       }
     });
 
-    socket.on('game:over', (data) => {
+    socket.on('game:over', (data: any) => {
       setPhase('finished');
       setWinnerId(data.winnerUserId);
+      const entries = Object.values(data.planes) as Array<{ userId: number; placements: PlanePlacement[] }>;
+      const opponentData = entries.find((p) => p.userId !== user?.id);
+      if (opponentData?.placements) {
+        setOpponentPlanes(opponentData.placements);
+      }
     });
 
     socket.on('game:play-again-pending', () => {
@@ -497,9 +505,19 @@ export default function Room() {
     );
   })();
 
-  const displayOpponentBoard = phase === 'playing' || phase === 'finished'
-    ? (opponentBoard.length > 0 ? opponentBoard : createEmptyBoard())
-    : createEmptyBoard();
+  const displayOpponentBoard = (() => {
+    if (phase !== 'playing' && phase !== 'finished') return createEmptyBoard();
+    const base = opponentBoard.length > 0 ? opponentBoard : createEmptyBoard();
+    if (!opponentPlanes || phase !== 'finished') return base;
+    const planeBoard = buildPreviewBoard(opponentPlanes);
+    return base.map((row, r) =>
+      row.map((cell, c) => {
+        if (cell !== 'unknown') return cell;
+        const plane = planeBoard[r][c];
+        return plane !== 'empty' ? plane : cell;
+      })
+    );
+  })();
 
   const isFinished = phase === 'finished';
   const opponentReady = opponent?.ready ?? false;

@@ -165,15 +165,15 @@ export class BombPlaneGateway {
       this.server.to(attackerSocketId).emit('game:over', {
         winnerUserId: data.userId,
         planes: {
-          player1: session.player1Planes,
-          player2: session.player2Planes,
+          player1: { userId: session.player1.userId, placements: session.player1Planes },
+          player2: { userId: session.player2.userId, placements: session.player2Planes },
         },
       });
       this.server.to(opponentSocketId).emit('game:over', {
         winnerUserId: data.userId,
         planes: {
-          player1: session.player1Planes,
-          player2: session.player2Planes,
+          player1: { userId: session.player1.userId, placements: session.player1Planes },
+          player2: { userId: session.player2.userId, placements: session.player2Planes },
         },
       });
       this.sessions.delete(data.roomId);
