@@ -151,7 +151,7 @@ function PlayerStatusBar({
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#fafafa', borderRadius: 8, marginBottom: 4 }}>
       <Avatar avatarUrl={player.avatarUrl} size={28} />
-      <Text strong={isMe} style={{ fontSize: 13 }}>{player.nickname}</Text>
+      <Text style={{ fontSize: 13 }}>{player.nickname}</Text>
       {isMe && <Tag color="blue" style={miniTag}>我</Tag>}
       {isCreator && <Tag color="gold" style={miniTag}>房主</Tag>}
 
@@ -224,6 +224,7 @@ export default function Room() {
   const [creatorId, setCreatorId] = useState<number | null>(null);
   const [phase, setPhase] = useState<GamePhase>('waiting');
   const [myBoard, setMyBoard] = useState<CellState[][]>([]);
+  const [myAttacked, setMyAttacked] = useState<CellView[][]>([]);
   const [opponentBoard, setOpponentBoard] = useState<CellView[][]>([]);
   const [isMyTurn, setIsMyTurn] = useState(false);
   const [winnerId, setWinnerId] = useState<number | null>(null);
@@ -300,6 +301,7 @@ export default function Room() {
         setCurrentDirection('up');
         setOpponentBoard([]);
         setMyBoard([]);
+        setMyAttacked([]);
         return;
       }
       if (data.phase === 'placing') {
@@ -313,6 +315,7 @@ export default function Room() {
         setHoverPos(null);
         setCurrentDirection('up');
         setOpponentBoard([]);
+        setMyAttacked([]);
       }
       setPhase(data.phase);
       if (data.phase === 'placing') {
@@ -334,6 +337,12 @@ export default function Room() {
       if (isAttacker) {
         setOpponentBoard((prev) => {
           const next = prev.map((row) => [...row]);
+          next[data.position.row][data.position.col] = data.result;
+          return next;
+        });
+      } else {
+        setMyAttacked((prev) => {
+          const next = prev.length > 0 ? prev.map((row) => [...row]) : Array.from({ length: 10 }, () => Array<CellView>(10).fill('unknown'));
           next[data.position.row][data.position.col] = data.result;
           return next;
         });
@@ -475,11 +484,18 @@ export default function Room() {
     setPlayAgainPending(true);
   }, [socket, id, user]);
 
-  const displayMyBoard = phase === 'waiting' && planes.length === 0 && myBoard.length === 0
-    ? Array.from({ length: 10 }, () => Array(10).fill('empty'))
-    : planes.length > 0 ? myBoard
-    : myBoard.length > 0 ? myBoard
-    : Array.from({ length: 10 }, () => Array(10).fill('empty'));
+  const emptyBoard = () => Array.from({ length: 10 }, () => Array(10).fill('empty'));
+
+  const displayMyBoard: (CellState | CellView)[][] = (() => {
+    const base = planes.length > 0 ? myBoard : myBoard.length > 0 ? myBoard : emptyBoard();
+    if (myAttacked.length === 0) return base;
+    return base.map((row, r) =>
+      row.map((cell, c) => {
+        const attacked = myAttacked[r]?.[c];
+        return attacked && attacked !== 'unknown' ? attacked : cell;
+      })
+    );
+  })();
 
   const displayOpponentBoard = phase === 'playing' || phase === 'finished'
     ? (opponentBoard.length > 0 ? opponentBoard : createEmptyBoard())
