@@ -149,7 +149,7 @@ function PlayerStatusBar({
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#fafafa', borderRadius: 8, marginBottom: 4 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#fafafa', borderRadius: 8, marginBottom: 4, minHeight: 44 }}>
       <Avatar avatarUrl={player.avatarUrl} size={28} />
       <Text style={{ fontSize: 13 }}>{player.nickname}</Text>
       {isMe && <Tag color="blue" style={miniTag}>我</Tag>}
@@ -560,7 +560,7 @@ export default function Room() {
       </div>
 
       {/* Two boards side by side */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 32, flex: 1 }}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 32, flex: 1, alignItems: 'flex-start' }}>
         {/* Left: My board */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <PlayerStatusBar
